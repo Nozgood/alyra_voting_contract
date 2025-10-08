@@ -30,7 +30,8 @@ contract Voting is Ownable {
         PROPOSALS_REGISTRATION_ENDED,
         VOTING_SESSION_STARTED,
         VOTING_SESSION_ENDED,
-        VOTES_TALLIED
+        VOTES_TALLIED,
+        CLOSED_SESSION
     }
 
     struct Voter {
@@ -50,8 +51,12 @@ contract Voting is Ownable {
     // state variables
     address[] public s_participants;
     WorkflowStatus s_votingStatus;
-    Proposal[] public s_proposals;
     Voter[] public s_voters;
+    uint256 private s_numberOfProposals;
+    uint256 private s_winningProposalID;
+
+    mapping(uint256 => Proposal) private s_proposalIDToProposal;
+    mapping(address => Voter) private s_participantToVote;
 
     event VoterRegistered(address voterAddress);
     event WorkflowStatusChange(
@@ -66,14 +71,45 @@ contract Voting is Ownable {
     error Voting__ProposalRegistrationNotOpen();
     error Voting__NotParticipant();
     error Voting__VotingSessionClosed();
+    error Voting__ProposalNotFound();
+    error Voting__ParticipantHasAlreadyVote();
+    error Voting__WinnerNotPicked();
+    error Voting__NoWinningProposal();
 
     constructor() Ownable(msg.sender) {
         i_administrator = msg.sender;
         s_votingStatus = WorkflowStatus.REGISTERING_VOTERS;
+        s_numberOfProposals = 0;
     }
 
     function getVotingStatus() public view returns (WorkflowStatus) {
         return s_votingStatus;
+    }
+
+    function getNumberOfProposals() public view returns (uint256) {
+        return s_numberOfProposals;
+    }
+
+    function getWinner() public view returns (Proposal memory winningProposal) {
+        if (s_votingStatus != WorkflowStatus.VOTES_TALLIED) {
+            revert Voting__WinnerNotPicked();
+        }
+
+        if (s_winningProposalID == 0) {
+            revert Voting__NoWinningProposal();
+        }
+
+        return s_proposalIDToProposal[s_winningProposalID];
+    }
+
+    function getProposal(
+        uint256 proposalID
+    ) public view returns (Proposal memory proposal) {
+        if (proposalID < s_numberOfProposals) {
+            revert Voting__ProposalNotFound();
+        }
+
+        return s_proposalIDToProposal[proposalID];
     }
 
     function checkSenderIsParticipant() private view returns (bool) {
@@ -132,6 +168,23 @@ contract Voting is Ownable {
         emit WorkflowStatusChange(oldWorkflowStatus, s_votingStatus);
     }
 
+    function startTallying() private {
+        _checkOwner();
+        WorkflowStatus oldWorkflowStatus = s_votingStatus;
+        s_votingStatus = WorkflowStatus.VOTES_TALLIED;
+
+        emit WorkflowStatusChange(oldWorkflowStatus, s_votingStatus);
+    }
+
+    function endSession() private {
+        _checkOwner();
+
+        WorkflowStatus oldWorkflowStatus = s_votingStatus;
+        s_votingStatus = WorkflowStatus.CLOSED_SESSION;
+
+        emit WorkflowStatusChange(oldWorkflowStatus, s_votingStatus);
+    }
+
     function createProposal(string calldata description) public {
         if (s_votingStatus != WorkflowStatus.PROPOSALS_REGISTRATION_STARTED) {
             revert Voting__ProposalRegistrationNotOpen();
@@ -141,9 +194,14 @@ contract Voting is Ownable {
             revert Voting__NotParticipant();
         }
 
-        s_proposals.push(Proposal({description: description, voteCount: 0}));
+        s_numberOfProposals++;
 
-        emit ProposalRegistered(s_proposals.length - 1);
+        s_proposalIDToProposal[s_numberOfProposals] = Proposal({
+            description: description,
+            voteCount: 0
+        });
+
+        emit ProposalRegistered(s_numberOfProposals);
     }
 
     function createVote(uint256 proposalID) public {
@@ -155,14 +213,46 @@ contract Voting is Ownable {
             revert Voting__NotParticipant();
         }
 
-        s_voters.push(
-            Voter({
-                isRegistered: true,
-                hasVoted: true,
-                votedProposalID: proposalID
-            })
-        );
+        if (proposalID > s_numberOfProposals) {
+            revert Voting__ProposalNotFound();
+        }
+
+        Voter memory existingVote = s_participantToVote[msg.sender];
+        if (existingVote.hasVoted) {
+            revert Voting__ParticipantHasAlreadyVote();
+        }
+
+        s_proposalIDToProposal[proposalID].voteCount++;
+
+        Voter memory vote = Voter({
+            isRegistered: true,
+            hasVoted: true,
+            votedProposalID: proposalID
+        });
+
+        s_voters.push(vote);
+        s_participantToVote[msg.sender] = vote;
 
         emit Voted(msg.sender, proposalID);
+    }
+
+    function pickWiningProposal() public {
+        _checkOwner();
+
+        startTallying();
+
+        uint256 winningProposalID = 0;
+        uint256 maxVotesCounts = 0;
+
+        for (uint256 i = 1; i <= s_numberOfProposals; i++) {
+            if (s_proposalIDToProposal[i].voteCount > maxVotesCounts) {
+                winningProposalID = i;
+                maxVotesCounts = s_proposalIDToProposal[i].voteCount;
+            }
+        }
+
+        s_winningProposalID = winningProposalID;
+
+        endSession();
     }
 }
