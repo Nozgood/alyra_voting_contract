@@ -49,9 +49,9 @@ contract Voting is Ownable {
     address private immutable i_administrator;
 
     // state variables
-    address[] public s_participants;
+    address[] private s_participants;
     WorkflowStatus s_votingStatus;
-    Voter[] public s_voters;
+    Voter[] private s_voters;
     uint256 private s_numberOfProposals;
     uint256 private s_winningProposalID;
 
@@ -75,6 +75,8 @@ contract Voting is Ownable {
     error Voting__ParticipantHasAlreadyVote();
     error Voting__WinnerNotPicked();
     error Voting__NoWinningProposal();
+    error Voting__ParticipantIndexOutOfRange();
+    error Voting__VoteIndexOutOfRange();
 
     constructor() Ownable(msg.sender) {
         i_administrator = msg.sender;
@@ -105,11 +107,37 @@ contract Voting is Ownable {
     function getProposal(
         uint256 proposalID
     ) public view returns (Proposal memory proposal) {
-        if (proposalID < s_numberOfProposals) {
+        if (
+            proposalID < s_numberOfProposals || proposalID > s_numberOfProposals
+        ) {
             revert Voting__ProposalNotFound();
         }
 
         return s_proposalIDToProposal[proposalID];
+    }
+
+    function getNumberofParticipants() public view returns (uint256) {
+        return s_participants.length;
+    }
+
+    function getParticipant(
+        uint256 participantIndex
+    ) public view returns (address participant) {
+        if (participantIndex > s_participants.length) {
+            revert Voting__ParticipantIndexOutOfRange();
+        }
+
+        return s_participants[participantIndex];
+    }
+
+    function getVote(
+        uint256 voteIndex
+    ) public view returns (Voter memory vote) {
+        if (voteIndex > s_voters.length) {
+            revert Voting__VoteIndexOutOfRange();
+        }
+
+        return s_voters[voteIndex];
     }
 
     function checkSenderIsParticipant() private view returns (bool) {
