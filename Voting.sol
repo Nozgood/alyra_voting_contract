@@ -45,9 +45,6 @@ contract Voting is Ownable {
         uint voteCount;
     }
 
-    // immutable variables
-    address private immutable i_administrator;
-
     // state variables
     address[] private s_participants;
     WorkflowStatus s_votingStatus;
@@ -77,9 +74,10 @@ contract Voting is Ownable {
     error Voting__NoWinningProposal();
     error Voting__ParticipantIndexOutOfRange();
     error Voting__VoteIndexOutOfRange();
+    error Voting__NoParticipant();
+    error Voting__NoVoters();
 
     constructor() Ownable(msg.sender) {
-        i_administrator = msg.sender;
         s_votingStatus = WorkflowStatus.REGISTERING_VOTERS;
         s_numberOfProposals = 0;
     }
@@ -93,7 +91,10 @@ contract Voting is Ownable {
     }
 
     function getWinner() public view returns (Proposal memory winningProposal) {
-        if (s_votingStatus != WorkflowStatus.VOTES_TALLIED) {
+        if (
+            s_votingStatus != WorkflowStatus.VOTES_TALLIED &&
+            s_votingStatus != WorkflowStatus.CLOSED_SESSION
+        ) {
             revert Voting__WinnerNotPicked();
         }
 
@@ -107,9 +108,7 @@ contract Voting is Ownable {
     function getProposal(
         uint256 proposalID
     ) public view returns (Proposal memory proposal) {
-        if (
-            proposalID < s_numberOfProposals || proposalID > s_numberOfProposals
-        ) {
+        if (proposalID < 1 || proposalID > s_numberOfProposals) {
             revert Voting__ProposalNotFound();
         }
 
@@ -123,6 +122,10 @@ contract Voting is Ownable {
     function getParticipant(
         uint256 participantIndex
     ) public view returns (address participant) {
+        if (s_participants.length == 0) {
+            revert Voting__NoParticipant();
+        }
+
         if (participantIndex > s_participants.length) {
             revert Voting__ParticipantIndexOutOfRange();
         }
@@ -133,6 +136,9 @@ contract Voting is Ownable {
     function getVote(
         uint256 voteIndex
     ) public view returns (Voter memory vote) {
+        if (s_voters.length == 0) {
+            revert Voting__NoVoters();
+        }
         if (voteIndex > s_voters.length) {
             revert Voting__VoteIndexOutOfRange();
         }
@@ -250,7 +256,7 @@ contract Voting is Ownable {
             revert Voting__ParticipantHasAlreadyVote();
         }
 
-        s_proposalIDToProposal[proposalID].voteCount++;
+        s_proposalIDToProposal[proposalID].voteCount += 1;
 
         Voter memory vote = Voter({
             isRegistered: true,
@@ -264,7 +270,7 @@ contract Voting is Ownable {
         emit Voted(msg.sender, proposalID);
     }
 
-    function pickWiningProposal() public {
+    function pickWiningProposalAndCloseSession() public {
         _checkOwner();
 
         startTallying();
